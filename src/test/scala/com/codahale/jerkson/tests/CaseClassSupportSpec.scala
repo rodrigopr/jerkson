@@ -45,6 +45,26 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
     }
   }
 
+  "A case class with public fields" - {
+    "should parse json with public fields" in {
+      val parsed = parse[CaseClassWithPublicFields]( """{"id":1,"uncomfortable":"Good Touch","unpleasant":"The Creeps"}""")
+      parsed.must(be(CaseClassWithPublicFields(1)))
+      parsed.uncomfortable.must(be("Good Touch"))
+      parsed.unpleasant.must(be("The Creeps"))
+    }
+
+    "should parse json with public fields missing" in {
+      val parsed = parse[CaseClassWithPublicFields]( """{"id":1}""")
+      parsed.must(be(CaseClassWithPublicFields(1)))
+      parsed.uncomfortable.must(be("Bad Touch"))
+      parsed.unpleasant.must(be("The Creeps"))
+    }
+
+    "should generate json with public fields" in {
+      generate(CaseClassWithPublicFields(1)).must(be("""{"id":1,"uncomfortable":"Bad Touch","unpleasant":"The Creeps"}"""))
+    }
+  }
+
   "A case class with lazy fields" - {
     "generates a JSON object with those fields evaluated" in {
       generate(CaseClassWithLazyVal(1)).must(be("""{"id":1,"woo":"yeah"}"""))

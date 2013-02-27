@@ -58,10 +58,10 @@ class CaseClassDeserializer(config: DeserializationConfig, javaType: JavaType, c
       }
     }.toMap
 
-    val betterConstructor = constructors.sortBy { case ConstructorInfo(cParams, _, _) => cParams.count(values.keySet.contains) * -1 }
-    val ConstructorInfo(constructorParams, _, constructorMethod) = betterConstructor.head
+    // choose the better construtor for the loaded json
+    val constructor = constructors.sortBy { case ConstructorInfo(cParams, _, _) => cParams.count(values.keySet.contains) * -1 }.head
 
-    val params = constructorParams.map { p =>
+    val params = constructor.params.map { p =>
       val v = values.getOrElse(p, null)
 
       if(v == null && !fields(p).isNullable) {
@@ -71,10 +71,10 @@ class CaseClassDeserializer(config: DeserializationConfig, javaType: JavaType, c
       v
     }.toArray
 
-    val instance = constructorMethod.apply(params: _*)
+    val instance = constructor.methodMirror.apply(params: _*)
 
-    if(fields.size != values.size) {
-      val remainFields = values.filterKeys(c => !constructorParams.contains(c))
+    if(!constructor.params.forall(values.keySet.contains)) {
+      val remainFields = values.filterKeys(c => !constructor.params.contains(c))
       if(!remainFields.isEmpty) {
         val instanceProxy = mirror.reflect(instance)
         remainFields.map { case (k,v) => (fields(k), v) }.foreach { case (field, value) =>
