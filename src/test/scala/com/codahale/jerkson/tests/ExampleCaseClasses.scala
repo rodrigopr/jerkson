@@ -4,6 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.annotation.{JsonIgnoreProperties, JsonIgnore}
 import com.codahale.jerkson.JsonSnakeCase
 
+object EnumX extends Enumeration {
+  type EnumX = Value
+  val ALT1, ALT2, ALT3 = Value
+}
+import EnumX._
+
+case class CaseClassWithEnum(id: Long, enum: EnumX, name: String)
+
 case class CaseClass(id: Long, name: String)
 
 case class CaseClassWithLazyVal(id: Long) {

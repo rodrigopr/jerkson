@@ -23,9 +23,25 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
     }
 
     "is not parsable from an incomplete JSON object" in {
-      intercept[ParsingException] {
-        parse[CaseClass]("""{"id":1}""")
-      }.getMessage must be ("""Invalid JSON. Needed [id, name], but found [id].""")
+      parse[CaseClass]("""{"id":1}""").must(be(CaseClass(1, null)))
+    }
+  }
+
+  "A case class with enum" - {
+    "should parse json with enum values" in {
+      parse[CaseClassWithEnum]("""{"id":1,"name":"Coda","enum":"ALT1"}""").must(be(CaseClassWithEnum(1, EnumX.ALT1, "Coda")))
+    }
+
+    "should parse json with null enum value" in {
+      parse[CaseClassWithEnum]("""{"id":1,"name":"Coda","enum":null}""").must(be(CaseClassWithEnum(1, null, "Coda")))
+    }
+
+    "should generate json with enum values" in {
+      generate(CaseClassWithEnum(1, EnumX.ALT1, "Coda")).must(be("""{"id":1,"enum":"ALT1","name":"Coda"}"""))
+    }
+
+    "should generate json with null enum values" in {
+      generate(CaseClassWithEnum(1, null, "Coda")).must(be("""{"id":1,"enum":null,"name":"Coda"}"""))
     }
   }
 
@@ -41,7 +57,7 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
     "is not parsable from an incomplete JSON object" in {
       intercept[ParsingException] {
         parse[CaseClassWithLazyVal]("""{}""")
-      }.getMessage must be("""Invalid JSON. Needed [id], but found [].""")
+      }.getMessage must be("Invalid JSON. field 'id' is required cause it's not nullable.")
     }
   }
 
@@ -59,11 +75,11 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
     "is not parsable from an incomplete JSON object" in {
       intercept[ParsingException] {
         parse[CaseClassWithIgnoredField]("""{}""")
-      }.getMessage must be("""Invalid JSON. Needed [id], but found [].""")
+      }.getMessage must be("Invalid JSON. field 'id' is required cause it's not nullable.")
 
       intercept[ParsingException] {
         parse[CaseClassWithIgnoredFields]("""{}""")
-      }.getMessage  must be("""Invalid JSON. Needed [id], but found [].""")
+      }.getMessage  must be("Invalid JSON. field 'id' is required cause it's not nullable.")
     }
   }
 
@@ -79,7 +95,7 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
     "is not parsable from an incomplete JSON object" in {
       intercept[ParsingException] {
         parse[CaseClassWithTransientField]("""{}""")
-      }.getMessage must be ("""Invalid JSON. Needed [id], but found [].""")
+      }.getMessage must be ("Invalid JSON. field 'id' is required cause it's not nullable.")
     }
   }
 
@@ -118,7 +134,7 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
   }
 
   "A case class with members of all ScalaSig types" - {
-    val json = """
+    val jsonParse = """
                {
                  "map": {
                    "one": "two"
@@ -153,33 +169,38 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
                }
                """
 
+    val jsonGenerated = """{"map":{"one":"two"},"set":[1,2,3],"string":"woo","list":[4,5,6],"seq":[7,8,9],"indexedSeq":[16,17,18],"vector":[22,23,24],"bigDecimal":12.0,"bigInt":13,"int":1,"long":2,"char":"x","bool":false,"short":14,"byte":15,"float":34.5,"double":44.9,"any":true,"anyRef":"wah","intMap":{"1":1},"longMap":{"2":2}}"""
+
+    val caseClassVal = CaseClassWithAllTypes(
+      map = Map("one" -> "two"),
+      set = Set(1, 2, 3),
+      string = "woo",
+      list = List(4, 5, 6),
+      seq = Seq(7, 8, 9),
+      indexedSeq = IndexedSeq(16, 17, 18),
+      vector = Vector(22, 23, 24),
+      bigDecimal = BigDecimal("12.0"),
+      bigInt = BigInt("13"),
+      int = 1,
+      long = 2L,
+      char = 'x',
+      bool = false,
+      short = 14,
+      byte = 15,
+      float = 34.5f,
+      double = 44.9d,
+      any = true,
+      anyRef = "wah",
+      intMap = Map(1 -> 1),
+      longMap = Map(2L -> 2L)
+    )
 
     "is parsable from a JSON object with those fields" in {
-      parse[CaseClassWithAllTypes](json).must(be(
-        CaseClassWithAllTypes(
-          map = Map("one" -> "two"),
-          set = Set(1, 2, 3),
-          string = "woo",
-          list = List(4, 5, 6),
-          seq = Seq(7, 8, 9),
-          indexedSeq = IndexedSeq(16, 17, 18),
-          vector = Vector(22, 23, 24),
-          bigDecimal = BigDecimal("12.0"),
-          bigInt = BigInt("13"),
-          int = 1,
-          long = 2L,
-          char = 'x',
-          bool = false,
-          short = 14,
-          byte = 15,
-          float = 34.5f,
-          double = 44.9d,
-          any = true,
-          anyRef = "wah",
-          intMap = Map(1 -> 1),
-          longMap = Map(2L -> 2L)
-        )
-      ))
+      parse[CaseClassWithAllTypes](jsonParse).must(be(caseClassVal))
+    }
+
+    "can generate JSON object with those fields" in {
+      generate[CaseClassWithAllTypes](caseClassVal).must(be(jsonGenerated))
     }
   }
 
@@ -201,9 +222,7 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
     }
 
     "is parsable from a JSON object which works with the second constructor" in {
-      intercept[ParsingException] {
-        parse[CaseClassWithTwoConstructors]("""{"id":1}""")
-      }
+      parse[CaseClassWithTwoConstructors]("""{"id":1}""").must(be(parse[CaseClassWithTwoConstructors]("""{"id":1}""")))
     }
   }
 
@@ -217,9 +236,7 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
     }
 
     "throws errors with the snake-cased field names present" in {
-      intercept[ParsingException] {
-        parse[CaseClassWithSnakeCase]("""{"one_thing":"yes"}""")
-      }.getMessage must be ("Invalid JSON. Needed [one_thing, two_thing], but found [one_thing].")
+        parse[CaseClassWithSnakeCase]("""{"one_thing":"yes"}""") must be (CaseClassWithSnakeCase("yes", null))
     }
   }
 

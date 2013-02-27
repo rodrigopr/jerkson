@@ -1,85 +1,155 @@
 package com.codahale.jerkson.deser
 
-import scala.collection.JavaConversions._
-import scala.collection.mutable.ArrayBuffer
-import com.codahale.jerkson.JsonSnakeCase
-import com.codahale.jerkson.util._
+import com.codahale.jerkson.{ParsingException, JsonSnakeCase}
 import com.codahale.jerkson.Util._
 import com.fasterxml.jackson.databind._
-import com.fasterxml.jackson.databind.node.{ObjectNode, NullNode, TreeTraversingParser}
+import com.fasterxml.jackson.databind.node.{NullNode, TreeTraversingParser}
 import com.fasterxml.jackson.databind.JavaType
 import com.fasterxml.jackson.core.{JsonToken, JsonParser}
+import scala.reflect.runtime.universe._
+import scala.Some
 
-class CaseClassDeserializer(config: DeserializationConfig,
-                            javaType: JavaType,
-                            classLoader: ClassLoader) extends JsonDeserializer[Object] {
+class CaseClassDeserializer(config: DeserializationConfig, javaType: JavaType, classLoader: ClassLoader) extends JsonDeserializer[Object] {
+  import CaseClassDeserializer._
+  case class FieldInfo(name: String, tpe: Type, term: TermSymbol, javaType: JavaType, isNullable: Boolean)
+  case class ConstructorInfo(params: List[String], methodSymbol: Symbol, methodMirror: MethodMirror)
+
+  private val mirror = reflect.runtime.universe.runtimeMirror(classLoader)
+  private val classSymbol = mirror.classSymbol(javaType.getRawClass)
+
   private val isSnakeCase = javaType.getRawClass.isAnnotationPresent(classOf[JsonSnakeCase])
-  private val params = CaseClassSigParser.parse(javaType.getRawClass, config.getTypeFactory, classLoader).map {
-    case (name, jt) => (if (isSnakeCase) snakeCase(name) else name, jt)
-  }.toArray
-  private val paramTypes = params.map { _._2.getRawClass }.toList
-  private val constructor = javaType.getRawClass.getConstructors.find { c =>
-    val constructorTypes = c.getParameterTypes.toList.map { t =>
-      t.toString match {
-        case "byte" => classOf[java.lang.Byte]
-        case "short" => classOf[java.lang.Short]
-        case "int" => classOf[java.lang.Integer]
-        case "long" => classOf[java.lang.Long]
-        case "float" => classOf[java.lang.Float]
-        case "double" => classOf[java.lang.Double]
-        case "char" => classOf[java.lang.Character]
-        case "boolean" => classOf[java.lang.Boolean]
-        case _ => t
-      }
-    }
-    constructorTypes == paramTypes
-  }.getOrElse { throw new JsonMappingException("Unable to find a case accessor for " + javaType.getRawClass.getName) }
 
-  def deserialize(jp: JsonParser, ctxt: DeserializationContext): Object = {
-    if (jp.getCurrentToken == JsonToken.START_OBJECT) {
-      jp.nextToken()
+  private val constructors = reflectConstructors()
+  private val fields = reflectFields()
+
+  def deserialize(jsonParser: JsonParser, context: DeserializationContext): Object = {
+    if (jsonParser.getCurrentToken == JsonToken.START_OBJECT) {
+      jsonParser.nextToken()
     }
 
-    if (jp.getCurrentToken != JsonToken.FIELD_NAME &&
-      jp.getCurrentToken != JsonToken.END_OBJECT) {
-      throw ctxt.mappingException(javaType.getRawClass)
+    if (jsonParser.getCurrentToken != JsonToken.FIELD_NAME &&
+      jsonParser.getCurrentToken != JsonToken.END_OBJECT) {
+      throw context.mappingException(javaType.getRawClass)
     }
 
-    val node = jp.readValueAsTree[JsonNode]
+    val node = jsonParser.readValueAsTree[JsonNode]
 
-    val values = new ArrayBuffer[AnyRef]
-    for ((paramName, paramType) <- params) {
-      val field = node.get(paramName)
-      val tp = new TreeTraversingParser(if (field == null) NullNode.getInstance else field, jp.getCodec)
-      val value = if (paramType.getRawClass == classOf[Option[_]]) {
-        // thanks again for special-casing VALUE_NULL
-        Option(tp.getCodec.readValue[Object](tp, paramType.containedType(0)))
+    val values: Map[String, AnyRef] = fields.flatMap { case (paramName, FieldInfo(name, paramType, paramTerm, fieldJavaType, _)) =>
+      val field = node.get(if(isSnakeCase) snakeCase(paramName) else paramName)
+      val tp = new TreeTraversingParser(if (field == null) NullNode.getInstance else field, jsonParser.getCodec)
+
+      val value = if (paramType <:< typeOf[Option[_]]) {
+        val containerType = paramType.asInstanceOf[TypeRefApi].args.head
+
+        Option(tp.getCodec.readValue(tp, mirror.runtimeClass(containerType)))
+      } else if (paramType <:< typeOf[Enumeration#Value]) {
+        val fullClassName = paramType.asInstanceOf[TypeRefApi].pre.typeSymbol.fullName
+        val deserializer = EnumerationDeserializer.deserializerFor(fullClassName, new EnumerationDeserializer(mirror, paramType))
+
+        deserializer.deserialize(tp)
       } else {
-        tp.getCodec.readValue[Object](tp, paramType)
+        tp.getCodec.readValue(tp, fieldJavaType)
       }
 
       if (field != null || value != null) {
-        values += value
+        Some(name -> value)
+      } else {
+        None
+      }
+    }.toMap
+
+    val betterConstructor = constructors.sortBy { case ConstructorInfo(cParams, _, _) => cParams.count(values.keySet.contains) * -1 }
+    val ConstructorInfo(constructorParams, _, constructorMethod) = betterConstructor.head
+
+    val params = constructorParams.map { p =>
+      val v = values.getOrElse(p, null)
+
+      if(v == null && !fields(p).isNullable) {
+        throw new ParsingException("Invalid JSON. field '%s' is required cause it's not nullable.".format(p), null)
       }
 
+      v
+    }.toArray
 
-      if (values.size == params.size) {
-        return constructor.newInstance(values.toArray: _*).asInstanceOf[Object]
+    val instance = constructorMethod.apply(params: _*)
+
+    if(fields.size != values.size) {
+      val remainFields = values.filterKeys(c => !constructorParams.contains(c))
+      if(!remainFields.isEmpty) {
+        val instanceProxy = mirror.reflect(instance)
+        remainFields.map { case (k,v) => (fields(k), v) }.foreach { case (field, value) =>
+          val term = field.term
+          if (!term.isFinal && !term.asTerm.isVal) {
+            instanceProxy.reflectField(term).set(value)
+          }
+        }
       }
     }
 
-    throw new JsonMappingException(errorMessage(node))
+    instance.asInstanceOf[Object]
   }
 
-  private def errorMessage(node: JsonNode) = {
-    val names = params.map { _._1 }.mkString("[", ", ", "]")
-    val existing = node match {
-      case obj: ObjectNode => obj.fieldNames.mkString("[", ", ", "]")
-      case _: NullNode => "[]" // this is what Jackson deserializes the inside of an empty object to
-      case unknown => "a non-object"
+  private def getJavaTypeFor(tpe: Type): JavaType = {
+    val runtimeClass = if(tpe =:= typeOf[Any]) {
+      classOf[Any]
+    } else if(tpe =:= typeOf[AnyRef]) {
+      classOf[AnyRef]
+    } else {
+      mirror.runtimeClass(tpe)
     }
-    "Invalid JSON. Needed %s, but found %s.".format(names, existing)
+
+    val factory = config.getTypeFactory
+
+    if(runtimeClass.isArray) {
+      val typeParams = tpe.asInstanceOf[TypeRefApi].args
+      factory.constructArrayType(mirror.runtimeClass(typeParams.head))
+    } else {
+      val typeParams = tpe.asInstanceOf[TypeRefApi].args.map(getJavaTypeFor).toArray
+      if(!typeParams.isEmpty) {
+        factory.constructSimpleType(runtimeClass, typeParams)
+      } else {
+        val properRuntimeClass = primitiveScalaMapping.getOrElse(runtimeClass, runtimeClass)
+
+        factory.constructType(properRuntimeClass)
+      }
+    }
+  }
+
+  private def reflectFields() = {
+    classSymbol.toType
+      .declarations
+      .filter(c => !c.isMethod && c.isTerm && (c.asTerm.isVal || c.asTerm.isVar))
+      .map { field =>
+        val name = field.name.toString.trim
+        val fieldType = field.typeSignature
+        val isNullable = !(fieldType <:< typeOf[AnyVal])
+
+        name -> FieldInfo(name, fieldType, field.asTerm, getJavaTypeFor(fieldType), isNullable)
+    }.toMap
+  }
+
+  private def reflectConstructors() = {
+    val tpe = classSymbol.toType
+    val constructors = tpe.declarations.filter(d => d.isMethod && d.asMethod.isConstructor)
+
+    constructors.map { c =>
+      val params = c.asMethod.paramss.flatten.map { p => p.name.toString.trim }
+      val methodMirror = mirror.reflectClass(classSymbol).reflectConstructor(c.asMethod)
+
+      ConstructorInfo(params, c, methodMirror)
+    }.toList
   }
 
   override def isCachable = true
+}
+
+object CaseClassDeserializer {
+  val primitiveScalaMapping = Map[Class[_], Class[_]](
+    classOf[Int] -> classOf[java.lang.Integer],
+    classOf[Long] -> classOf[java.lang.Long],
+    classOf[Float] -> classOf[java.lang.Float],
+    classOf[Double] -> classOf[java.lang.Double],
+    classOf[Byte] -> classOf[java.lang.Byte],
+    classOf[Boolean] -> classOf[java.lang.Boolean]
+  )
 }
