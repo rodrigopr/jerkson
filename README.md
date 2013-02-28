@@ -2,8 +2,8 @@ Scala 2.10 Compatible
 ---------------------
 
 This is a fork of [Jerkson](https://github.com/codahale/jerkson) library compatible with Scala 2.10.
-Upgrade has been done by [Piotr Gabryanczyk](mailto:piotrga@gmail.com).
-
+Initial upgrade has been done by [Piotr Gabryanczyk](mailto:piotrga@gmail.com).
+The change to use scala 2.10 reflection api has been done by [Rodrigo Ribeiro](http://github.com/rodrigopr)
 
 Jerkson
 -------
