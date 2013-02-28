@@ -26,7 +26,7 @@ class ScalaSerializers extends Serializers.Base {
     } else if (classOf[Either[_,_]].isAssignableFrom(beanDesc.getBeanClass)) {
       new EitherSerializer
     } else if (classOf[Product].isAssignableFrom(beanDesc.getBeanClass)) {
-      new CaseClassSerializer(beanDesc.getBeanClass)
+      new CaseClassSerializer(beanDesc.getBeanClass, mirror)
     } else if(classOf[Enumeration#Value].isAssignableFrom(javaType.getRawClass)) {
       new EnumerationSerializer(mirror.classSymbol(javaType.getRawClass))
     } else {

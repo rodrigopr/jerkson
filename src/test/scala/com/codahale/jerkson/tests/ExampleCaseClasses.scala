@@ -29,6 +29,22 @@ case class CaseClassWithIgnoredFields(id: Long) {
   val unpleasant = "The Creeps"
 }
 
+case class CaseClassWithPublicFields(id: Long) {
+  var uncomfortable = "Bad Touch"
+  var unpleasant = "The Creeps"
+}
+
+abstract class AbsClassWithPublicFields {
+  val id: Long
+
+  var uncomfortable = "Bad Touch"
+  var unpleasant = "The Creeps"
+}
+
+case class CaseClassWithPublicFieldsExp(id: Long) extends AbsClassWithPublicFields {
+  var superUncomfortable = "Multiple Bad Touch"
+}
+
 case class CaseClassWithTransientField(id: Long) {
   @transient
   val lol = "I'm sure it's just a phase."

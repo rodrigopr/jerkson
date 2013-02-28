@@ -37,11 +37,11 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
     }
 
     "should generate json with enum values" in {
-      generate(CaseClassWithEnum(1, EnumX.ALT1, "Coda")).must(be("""{"id":1,"enum":"ALT1","name":"Coda"}"""))
+      generate(CaseClassWithEnum(1, EnumX.ALT1, "Coda")).must(be("""{"enum":"ALT1","id":1,"name":"Coda"}"""))
     }
 
     "should generate json with null enum values" in {
-      generate(CaseClassWithEnum(1, null, "Coda")).must(be("""{"id":1,"enum":null,"name":"Coda"}"""))
+      generate(CaseClassWithEnum(1, null, "Coda")).must(be("""{"enum":null,"id":1,"name":"Coda"}"""))
     }
   }
 
@@ -62,6 +62,26 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
 
     "should generate json with public fields" in {
       generate(CaseClassWithPublicFields(1)).must(be("""{"id":1,"uncomfortable":"Bad Touch","unpleasant":"The Creeps"}"""))
+    }
+
+    "should parse public fields from super class" in {
+      val parsed = parse[CaseClassWithPublicFieldsExp]( """{"id":1,"uncomfortable":"Good Touch","unpleasant":"The Creeps","superUncomfortable":"Nothing"}""")
+      parsed.must(be(CaseClassWithPublicFieldsExp(1)))
+      parsed.uncomfortable.must(be("Good Touch"))
+      parsed.unpleasant.must(be("The Creeps"))
+      parsed.superUncomfortable.must(be("Nothing"))
+    }
+
+    "should parse public fields with fields from super class missing" in {
+      val parsed = parse[CaseClassWithPublicFieldsExp]( """{"id":1,"superUncomfortable":"Nothing"}""")
+      parsed.must(be(CaseClassWithPublicFieldsExp(1)))
+      parsed.uncomfortable.must(be("Bad Touch"))
+      parsed.unpleasant.must(be("The Creeps"))
+      parsed.superUncomfortable.must(be("Nothing"))
+    }
+
+    "should generate json with fields from super class" in {
+      generate(CaseClassWithPublicFieldsExp(1)).must(be("""{"id":1,"superUncomfortable":"Multiple Bad Touch","uncomfortable":"Bad Touch","unpleasant":"The Creeps"}"""))
     }
   }
 
@@ -189,7 +209,7 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
                }
                """
 
-    val jsonGenerated = """{"map":{"one":"two"},"set":[1,2,3],"string":"woo","list":[4,5,6],"seq":[7,8,9],"indexedSeq":[16,17,18],"vector":[22,23,24],"bigDecimal":12.0,"bigInt":13,"int":1,"long":2,"char":"x","bool":false,"short":14,"byte":15,"float":34.5,"double":44.9,"any":true,"anyRef":"wah","intMap":{"1":1},"longMap":{"2":2}}"""
+    val jsonGenerated = """{"any":true,"anyRef":"wah","bigDecimal":12.0,"bigInt":13,"bool":false,"byte":15,"char":"x","double":44.9,"float":34.5,"indexedSeq":[16,17,18],"int":1,"intMap":{"1":1},"list":[4,5,6],"long":2,"longMap":{"2":2},"map":{"one":"two"},"seq":[7,8,9],"set":[1,2,3],"short":14,"string":"woo","vector":[22,23,24]}"""
 
     val caseClassVal = CaseClassWithAllTypes(
       map = Map("one" -> "two"),
@@ -271,7 +291,7 @@ class CaseClassSupportSpec extends FreeSpec with MustMatchers {
 
     "generates a JSON object" in {
       generate(CaseClassWithArrays("1", Array("a", "b", "c"), Array(1, 2, 3))).must(be(
-        """{"one":"1","two":["a","b","c"],"three":[1,2,3]}"""
+        """{"one":"1","three":[1,2,3],"two":["a","b","c"]}"""
       ))
     }
   }

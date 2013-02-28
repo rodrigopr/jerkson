@@ -11,7 +11,7 @@ import scala.Some
 
 class CaseClassDeserializer(config: DeserializationConfig, javaType: JavaType, classLoader: ClassLoader) extends JsonDeserializer[Object] {
   import CaseClassDeserializer._
-  case class FieldInfo(name: String, tpe: Type, term: TermSymbol, javaType: JavaType, isNullable: Boolean)
+  case class FieldInfo(name: String, tpe: Type, setter: Option[MethodSymbol], javaType: JavaType, isNullable: Boolean)
   case class ConstructorInfo(params: List[String], methodSymbol: Symbol, methodMirror: MethodMirror)
 
   private val mirror = reflect.runtime.universe.runtimeMirror(classLoader)
@@ -73,16 +73,11 @@ class CaseClassDeserializer(config: DeserializationConfig, javaType: JavaType, c
 
     val instance = constructor.methodMirror.apply(params: _*)
 
-    if(!constructor.params.forall(values.keySet.contains)) {
-      val remainFields = values.filterKeys(c => !constructor.params.contains(c))
-      if(!remainFields.isEmpty) {
-        val instanceProxy = mirror.reflect(instance)
-        remainFields.map { case (k,v) => (fields(k), v) }.foreach { case (field, value) =>
-          val term = field.term
-          if (!term.isFinal && !term.asTerm.isVal) {
-            instanceProxy.reflectField(term).set(value)
-          }
-        }
+    val remainFields = values.filterKeys(c => !constructor.params.contains(c))
+    if(!remainFields.isEmpty) {
+      val instanceProxy = mirror.reflect(instance)
+      remainFields.map { case (k,v) => (fields(k), v) }.foreach { case (field, value) =>
+        field.setter.map(m => instanceProxy.reflectMethod(m).apply(value))
       }
     }
 
@@ -116,16 +111,21 @@ class CaseClassDeserializer(config: DeserializationConfig, javaType: JavaType, c
   }
 
   private def reflectFields() = {
-    classSymbol.toType
-      .declarations
-      .filter(c => !c.isMethod && c.isTerm && (c.asTerm.isVal || c.asTerm.isVar))
-      .map { field =>
-        val name = field.name.toString.trim
-        val fieldType = field.typeSignature
-        val isNullable = !(fieldType <:< typeOf[AnyVal])
+    val members = classSymbol.toType.members
 
-        name -> FieldInfo(name, fieldType, field.asTerm, getJavaTypeFor(fieldType), isNullable)
-    }.toMap
+    val x = members
+      .view
+      .filter(c => c.isMethod && c.asMethod.isGetter)
+      .map { getter =>
+        val name = getter.name.toString.trim
+        val fieldType = getter.asMethod.returnType
+        val isNullable = !(fieldType <:< typeOf[AnyVal])
+        val setter = getter.asMethod.setter
+
+        name -> FieldInfo(name, fieldType, if(setter == NoSymbol) None else Some(setter.asMethod), getJavaTypeFor(fieldType), isNullable)
+      }.toMap
+
+    x
   }
 
   private def reflectConstructors() = {

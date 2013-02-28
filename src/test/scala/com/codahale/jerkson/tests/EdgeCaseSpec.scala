@@ -55,7 +55,7 @@ class EdgeCaseSpec extends FreeSpec with MustMatchers {
 
       intercept[ParsingException] {
         parse[CaseClass]("{\"woo\": 1}")
-      }.getMessage must be("field 'id' is required cause it's not nullable")
+      }.getMessage must be("Invalid JSON. field 'id' is required cause it's not nullable.")
     }
   }
 
