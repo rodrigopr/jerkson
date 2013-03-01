@@ -4,9 +4,10 @@ import java.lang.reflect.{Field, Modifier}
 import com.codahale.jerkson.JsonSnakeCase
 import com.codahale.jerkson.Util._
 import com.fasterxml.jackson.core.JsonGenerator
-import com.fasterxml.jackson.annotation.{JsonIgnore, JsonIgnoreProperties}
+import com.fasterxml.jackson.annotation.{ObjectIdGenerators, JsonIgnore, JsonIgnoreProperties}
 import com.fasterxml.jackson.databind.{SerializerProvider, JsonSerializer}
 import reflect.runtime.universe._
+import com.fasterxml.jackson.databind.ser.impl.WritableObjectId
 
 class CaseClassSerializer(klass: Class[_], mirror: Mirror) extends JsonSerializer[Any] {
   private val isSnakeCase = klass.isAnnotationPresent(classOf[JsonSnakeCase])
@@ -27,8 +28,10 @@ class CaseClassSerializer(klass: Class[_], mirror: Mirror) extends JsonSerialize
   
   private val getters = tpe.members.view
     .filter { m => m.isMethod && m.asMethod.isGetter }
-    .filter { m =>
+    .map { m =>
       val name = m.name.toString.trim
+      (name, getFieldFromClassOrSuper(klass, name), m)
+    }.filter { case (name, jField, m) =>
 
       val jField = getFieldFromClassOrSuper(klass, name)
       val isTransient = ((jField.getModifiers & Modifier.TRANSIENT) != 0)
@@ -36,17 +39,38 @@ class CaseClassSerializer(klass: Class[_], mirror: Mirror) extends JsonSerialize
       val ignoreField = jField.isAnnotationPresent(classOf[JsonIgnore])
 
       !ignoredFields(name) && !ignoreField && !isTransient
-    }.map {g => (g.name.toString.trim, g.asMethod) }.toList.sortBy(c => c._1)
+    }.toList.sortBy(c => c._1)
   
   def serialize(value: Any, json: JsonGenerator, provider: SerializerProvider) {
     json.writeStartObject()
     val reflectInstance = mirror.reflect(value)
-    getters.foreach{ case (name, getter) =>
-      val fieldValue = reflectInstance.reflectMethod(getter).apply()
-      if(None != fieldValue) {
-        provider.defaultSerializeField(if (isSnakeCase) snakeCase(name) else name, fieldValue, json)
+
+    val writableId: WritableObjectId = getWritableIdFor(provider, value)
+    writableId.id = false.asInstanceOf[AnyRef]
+
+    getters.foreach{ case (name, field, getter) =>
+      val fieldValue = reflectInstance.reflectMethod(getter.asMethod).apply()
+      if(None != fieldValue && fieldValue != null) {
+        val shouldWrite = if(classOf[Product].isAssignableFrom(field.getType)) {
+          getWritableIdFor(provider, fieldValue).id == null
+        } else true
+
+        if (shouldWrite) {
+          provider.defaultSerializeField(if (isSnakeCase) snakeCase(name) else name, fieldValue, json)
+        }
       }
     }
+
+    writableId.id = null
+
     json.writeEndObject()
   }
+
+  def getWritableIdFor(provider: SerializerProvider, value: Any): WritableObjectId = {
+    provider.findObjectId(value, CaseClassSerializer.sequenceGenerator)
+  }
+}
+
+object CaseClassSerializer {
+  val sequenceGenerator = new ObjectIdGenerators.IntSequenceGenerator
 }
