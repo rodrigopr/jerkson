@@ -4,6 +4,8 @@ import com.codahale.jerkson.AST.JValue
 import com.fasterxml.jackson.databind._
 import com.fasterxml.jackson.databind.ser.Serializers
 import scala.reflect.runtime.universe._
+import com.codahale.jerkson.ScalaJsonSerializable
+import java.{util => ju}
 
 class ScalaSerializers extends Serializers.Base {
   private[this] val mirror = runtimeMirror(Thread.currentThread().getContextClassLoader)
@@ -25,7 +27,11 @@ class ScalaSerializers extends Serializers.Base {
       new JValueSerializer
     } else if (classOf[Either[_,_]].isAssignableFrom(beanDesc.getBeanClass)) {
       new EitherSerializer
-    } else if (classOf[Product].isAssignableFrom(beanDesc.getBeanClass)) {
+    } else if (classOf[ju.AbstractCollection[_]].isAssignableFrom(beanDesc.getBeanClass)) {
+      new JavaAbstractCollectionSerializer
+    } else if (classOf[ju.Map[_,_]].isAssignableFrom(beanDesc.getBeanClass)) {
+      new JavaAbstractMapSerializer
+    } else if (classOf[Product].isAssignableFrom(beanDesc.getBeanClass) || classOf[ScalaJsonSerializable].isAssignableFrom(beanDesc.getBeanClass)) {
       new CaseClassSerializer(beanDesc.getBeanClass, mirror)
     } else if(classOf[Enumeration#Value].isAssignableFrom(javaType.getRawClass)) {
       new EnumerationSerializer(mirror.classSymbol(javaType.getRawClass))
